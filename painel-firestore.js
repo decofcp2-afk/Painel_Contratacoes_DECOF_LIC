@@ -467,11 +467,20 @@
   function aplicarDisponibilidade(ag, agenda, hoje) {
     if (!ag.qtdServidores) return { ok: false, erro: 'Sem equipe cadastrada nesta unidade' };
     var ausentes = 0;
-    if (agenda && agenda.versao !== 1) throw new Error('Versão da disponibilidade não suportada.');
-    ((agenda && agenda.transicoes) || []).forEach(function(t) {
-      if (t.data <= hoje) ausentes = t.ausentes;
+    var resumoIndisponivel = !!(agenda && agenda.__erroLeitura);
+    var transicoes = agenda && agenda.transicoes;
+    if (typeof transicoes === 'string') {
+      try { transicoes = JSON.parse(transicoes); }
+      catch (e) { transicoes = []; resumoIndisponivel = true; }
+    }
+    if (agenda && agenda.versao !== 1) resumoIndisponivel = true;
+    if (!Array.isArray(transicoes)) { transicoes = []; if (agenda) resumoIndisponivel = true; }
+    transicoes.forEach(function(t) {
+      if (t && t.data <= hoje) ausentes = Number(t.ausentes);
     });
-    if (!Number.isInteger(ausentes) || ausentes < 0) throw new Error('Resumo de disponibilidade inválido.');
+    if (!Number.isInteger(ausentes) || ausentes < 0 || ausentes > ag.qtdServidores) {
+      ausentes = 0; resumoIndisponivel = true;
+    }
     var teto = Math.max(0, ag.qtdServidores - ausentes) * 10;
     var pct = teto > 0 ? Math.round(ag.totalPts / teto * 100 + 1e-9) : null;
     var ocupacao = teto > 0 ? ag.totalPts / teto : null;
@@ -480,8 +489,10 @@
       : ocupacao >= 0.9 ? 'Capacidade máxima — não encaminhar novos processos; aguardar orientação do SEL'
       : ocupacao >= 0.6 ? 'Capacidade limitada — encaminhar somente demandas prioritárias ou de baixa complexidade'
       : 'Setor disponível — novos processos podem ser encaminhados regularmente';
-    return { ok: true, pct: pct, nivel: nivel, mensagem: (ausentes ? 'Capacidade reduzida. ' : '') + mensagem,
-      totalPts: ag.totalPts, tetoPts: teto, capacidadeReduzida: ausentes > 0, semCapacidade: teto === 0, fase: 'interna' };
+    return { ok: true, pct: pct, nivel: nivel,
+      mensagem: (resumoIndisponivel ? 'Disponibilidade da equipe pendente de sincronização. ' : (ausentes ? 'Capacidade reduzida. ' : '')) + mensagem,
+      totalPts: ag.totalPts, tetoPts: teto, capacidadeReduzida: ausentes > 0,
+      disponibilidadeIndisponivel: resumoIndisponivel, semCapacidade: teto === 0, fase: 'interna' };
   }
 
   function carregarCapacidade() {
@@ -494,7 +505,7 @@
       base.collection('cargas').get(),
       base.collection('etapas').get(),
       base.collection('servidores').get(),
-      base.collection('config').doc('capacidadeDisponivel').get()
+      base.collection('config').doc('capacidadeDisponivel').get().catch(function() { return { exists: true, data: function(){ return { __erroLeitura: true }; } }; })
     ]).then(function (s) {
       var map = function (snap) { return snap.docs.map(function (d) { var o = d.data(); o._id = d.id; return o; }); };
       var ag = _construirCapacidadeInterna(map(s[0]), map(s[1]), map(s[2]));

@@ -24,3 +24,11 @@ test('A carga original não é apagada nem duplicada', () => {
   const cap = aplicarDisponibilidade(r, { versao: 1, transicoes: [{ data: '2026-01-01', ausentes: 1 }] }, '2026-09-01');
   assert.equal(cap.totalPts, 7); assert.equal(cap.tetoPts, 0);
 });
+test('Resumo inválido não derruba o KPI inteiro para N/D', () => {
+  const legado = { versao: 1, transicoes: '[object Object],[object Object]' };
+  const r = aplicarDisponibilidade(ag, legado, '2026-09-15');
+  assert.equal(r.ok, true);
+  assert.equal(r.pct, 50);
+  assert.equal(r.disponibilidadeIndisponivel, true);
+  assert.match(r.mensagem, /pendente de sincronização/);
+});
