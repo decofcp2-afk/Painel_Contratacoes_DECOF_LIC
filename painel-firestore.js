@@ -464,6 +464,26 @@
     };
   }
 
+  function aplicarDisponibilidade(ag, agenda, hoje) {
+    if (!ag.qtdServidores) return { ok: false, erro: 'Sem equipe cadastrada nesta unidade' };
+    var ausentes = 0;
+    if (agenda && agenda.versao !== 1) throw new Error('Versão da disponibilidade não suportada.');
+    ((agenda && agenda.transicoes) || []).forEach(function(t) {
+      if (t.data <= hoje) ausentes = t.ausentes;
+    });
+    if (!Number.isInteger(ausentes) || ausentes < 0) throw new Error('Resumo de disponibilidade inválido.');
+    var teto = Math.max(0, ag.qtdServidores - ausentes) * 10;
+    var pct = teto > 0 ? Math.round(ag.totalPts / teto * 100 + 1e-9) : null;
+    var ocupacao = teto > 0 ? ag.totalPts / teto : null;
+    var nivel = ocupacao === null || ocupacao >= 0.9 ? '🔴 Máxima' : ocupacao >= 0.6 ? '🟡 Limitada' : '🟢 Disponível';
+    var mensagem = pct === null ? 'Sem capacidade disponível — aguardar orientação do setor'
+      : ocupacao >= 0.9 ? 'Capacidade máxima — não encaminhar novos processos; aguardar orientação do SEL'
+      : ocupacao >= 0.6 ? 'Capacidade limitada — encaminhar somente demandas prioritárias ou de baixa complexidade'
+      : 'Setor disponível — novos processos podem ser encaminhados regularmente';
+    return { ok: true, pct: pct, nivel: nivel, mensagem: (ausentes ? 'Capacidade reduzida. ' : '') + mensagem,
+      totalPts: ag.totalPts, tetoPts: teto, capacidadeReduzida: ausentes > 0, semCapacidade: teto === 0, fase: 'interna' };
+  }
+
   function carregarCapacidade() {
     var cfg = (root.PAINEL_CONFIG && root.PAINEL_CONFIG.firebase) || null;
     if (!cfg || !root.firebase) return Promise.reject(new Error('Firebase nao configurado.'));
@@ -473,34 +493,21 @@
     return Promise.all([
       base.collection('cargas').get(),
       base.collection('etapas').get(),
-      base.collection('servidores').get()
+      base.collection('servidores').get(),
+      base.collection('config').doc('capacidadeDisponivel').get()
     ]).then(function (s) {
       var map = function (snap) { return snap.docs.map(function (d) { var o = d.data(); o._id = d.id; return o; }); };
       var ag = _construirCapacidadeInterna(map(s[0]), map(s[1]), map(s[2]));
-      // Sem equipe cadastrada → não há teto: não faz sentido exibir percentual.
-      if (!ag.qtdServidores || ag.tetoPts <= 0) {
-        return { ok: false, erro: 'Sem equipe cadastrada nesta unidade' };
-      }
-      var pct = ag.totalPts / ag.tetoPts;
-      var nivel = pct >= 0.9 ? '🔴 Máxima' : pct >= 0.6 ? '🟡 Limitada' : '🟢 Disponível';
-      var mensagem = pct >= 0.9
-        ? 'Capacidade máxima — não encaminhar novos processos; aguardar orientação do SEL'
-        : pct >= 0.6
-        ? 'Capacidade limitada — encaminhar somente demandas prioritárias ou de baixa complexidade'
-        : 'Setor disponível — novos processos podem ser encaminhados regularmente';
-      return {
-        ok: true,
-        pct: Math.round(pct * 100 + 1e-9),
-        nivel: nivel,
-        mensagem: mensagem,
-        totalPts: ag.totalPts,
-        tetoPts: ag.tetoPts,
-        fase: 'interna'
-      };
+      // Ausência do documento mantém o comportamento legado; falhas de leitura
+      // rejeitam o KPI, sem anunciar uma disponibilidade fictícia.
+      var hoje = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+      return aplicarDisponibilidade(ag, s[3].exists ? s[3].data() : null, hoje);
     });
   }
 
   root.PainelFirestore = {
+    aplicarDisponibilidade: aplicarDisponibilidade,
+    construirCapacidadeInterna: _construirCapacidadeInterna,
     construirProcessos: construirProcessos,
     carregarVisaoGeral: carregarVisaoGeral,
     listarUnidades: listarUnidades,

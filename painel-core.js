@@ -159,8 +159,15 @@ function carregarCapacidade() {
     .catch(function() {
       document.getElementById('kv-cap').textContent    = 'N/D';
       document.getElementById('kv-cap-msg').textContent = 'Indisponivel';
+      document.getElementById('kv-cap-bar').style.width = '0%';
     });
 }
+// Reavalia somente o KPI na virada da data brasileira, inclusive em abas abertas.
+var capacidadeDia = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+setInterval(function() {
+  var hoje = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+  if (hoje !== capacidadeDia) { capacidadeDia = hoje; carregarCapacidade(); }
+}, 60000);
 /*
  * updateCapacidade(cap)
  * Atualiza o card KPI de capacidade com os dados recebidos.
@@ -186,11 +193,11 @@ function updateCapacidade(cap) {
   var emoji = /máxima|maxima/i.test(cap.nivel) ? '🔴'
             : /limitada/i.test(cap.nivel)        ? '🟡'
             : '🟢';
-  document.getElementById('kv-cap').textContent = emoji + ' ' + cap.pct + '%';
+  document.getElementById('kv-cap').textContent = cap.semCapacidade ? '—' : emoji + ' ' + cap.pct + '%';
 
   // Barra de progresso
   var bar = document.getElementById('kv-cap-bar');
-  if (bar) bar.style.width = Math.min(cap.pct, 100) + '%';
+  if (bar) bar.style.width = (cap.semCapacidade ? 0 : Math.min(cap.pct, 100)) + '%';
 
   // Mensagem sutil
   document.getElementById('kv-cap-msg').textContent = cap.mensagem || '';
